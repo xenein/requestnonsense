@@ -9,6 +9,8 @@ import requests
 import time
 import os
 
+hackmdtags = "---\ntags: config('HACKMDTAG', default='requestnonsense')\n---"
+
 
 def create_note(content: str) -> str:
     headers = {"Authorization": f"Bearer {config('HACKMDTOKEN')}"}
@@ -43,7 +45,7 @@ def update_note(content: str, note_url: str) -> bool:
 
 
 def generate_requests_markdown(queue: list) -> str:
-    requests_markdown = ["# Xenias mystische Warteschlange", "", "| Pos | Song | User |", "| --- | --- | --- |"]
+    requests_markdown = [f"{hackmdtags}# Xenias mystische Warteschlange", "", "| Pos | Song | User |", "| --- | --- | --- |"]
     for idx, request in enumerate(queue, start=1):
         requests_markdown.append(f"| {idx} | {request[-2]} | {request[-1]} |")
 
@@ -52,7 +54,7 @@ def generate_requests_markdown(queue: list) -> str:
 
 queue = []
 requests_url = create_note(
-    "# Xenias mystische Warteschlange \n Gerade beeindruckend leer."
+    f"{hackmdtags}# Xenias mystische Warteschlange \n Gerade beeindruckend leer."
 )
 if os.path.exists(config("QUEUE_FILE")):
     with open(config("QUEUE_FILE"), mode="rb") as fh:
@@ -78,13 +80,14 @@ if os.path.exists(config("SONGLIST")):
         songs[idx] = f"{song[0]} - {song[1]}"
 
     songlist_markdown = [
+        hackmdtags,
         """# Xenias mystische Songliste
 
 Such dir einen Song raus, kopier das Request-Command und fügs im Chat ein.
 
 
 
-| Artist | Title | Command |
+| Artist | Title | Command&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; |
 | --- | --- | --- |"""
     ]
     for idx, song in enumerate(song_list, start=1):
@@ -94,7 +97,7 @@ Such dir einen Song raus, kopier das Request-Command und fügs im Chat ein.
 
 
 def get_index_for_user(user: str) -> int | None:
-    for idx, entry in enumerate(queue):
+    for idx, entry in enumerate(queue, start=1):
         if entry[-1] == user:
             return idx
     return None
@@ -138,7 +141,7 @@ class Bot(commands.Bot):
             current = False
             prio = False
             moment = time.time()
-            requestee = ctx.author.name
+            requestee = str(ctx.author.name)
 
             if idx := get_index_for_user(requestee) is not None:
                 request_tuple = (current, prio, queue[idx][2], song, requestee)
