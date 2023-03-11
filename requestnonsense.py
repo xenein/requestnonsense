@@ -1,4 +1,18 @@
 #!/usr/bin/env python3
+"""
+so, requests are tuples.
+like so (waiting: bool, non_prio: bool, timestamp: float, song: str, requestee: str)
+waiting is opposite of current, non_prio <-> prio
+we put them in a list. why?
+we can use .sort() and get it nicely ordered
+
+what else?
+everyone in chat can request
+you can have one request in queue
+if you send another, you keep your place in the queue, song is changed though
+
+the list of available songs as well as the current queue are pushed to hackmd-notes
+"""
 
 from decouple import config
 from twitchio.ext import commands
@@ -45,7 +59,14 @@ def update_note(content: str, note_url: str) -> bool:
 
 
 def generate_requests_markdown(queue: list) -> str:
-    requests_markdown = [f"{hackmdtags}# Xenias mystische Warteschlange", "", "| Pos | Song | User |", "| --- | --- | --- |"]
+    if len(queue) == 0:
+        return f"{hackmdtags}# {config('QUEUETITLE', default='Queue')}\n Beeindruckend leer hier"
+    requests_markdown = [
+        f"{hackmdtags}# {config('QUEUETITLE', default='Queue')}",
+        "",
+        "| Pos | Song | User |",
+        "| --- | --- | --- |",
+    ]
     for idx, request in enumerate(queue, start=1):
         requests_markdown.append(f"| {idx} | {request[-2]} | {request[-1]} |")
 
@@ -54,7 +75,7 @@ def generate_requests_markdown(queue: list) -> str:
 
 queue = []
 requests_url = create_note(
-    f"{hackmdtags}# Xenias mystische Warteschlange \n Gerade beeindruckend leer."
+    f"{hackmdtags}# {config('QUEUETITLE', default='Queue')}\n Gerade beeindruckend leer."
 )
 if os.path.exists(config("QUEUE_FILE")):
     with open(config("QUEUE_FILE"), mode="rb") as fh:
@@ -81,14 +102,14 @@ if os.path.exists(config("SONGLIST")):
 
     songlist_markdown = [
         hackmdtags,
-        """# Xenias mystische Songliste
+        f"""# {config("LISTTITLE", default="List")}
 
 Such dir einen Song raus, kopier das Request-Command und fügs im Chat ein.
 
 
 
 | Artist | Title | Command&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; |
-| --- | --- | --- |"""
+| --- | --- | --- |""",
     ]
     for idx, song in enumerate(song_list, start=1):
         songlist_markdown.append(f"| {song[0]} | {song[1]} | ?request {idx} |")
@@ -100,6 +121,13 @@ def get_index_for_user(user: str) -> int | None:
     for idx, entry in enumerate(queue, start=1):
         if entry[-1] == user:
             return idx
+    return None
+
+
+def get_request_for_user(user: str) -> tuple | None:
+    for entry in queue:
+        if entry[-1] == user:
+            return entry
     return None
 
 
@@ -120,11 +148,11 @@ class Bot(commands.Bot):
     async def event_ready(self):
         print(f"Logged in as: {self.nick}")
         print(f"User id: {self.user_id}")
+        await self.connected_channels[0].send("Requestnonse bereit")
 
     @commands.command()
     async def meow(self, ctx: commands.Context):
         print("meow awaited")
-        print(ctx.message.content)
         await ctx.send("meow!")
 
     @commands.command()
@@ -134,23 +162,26 @@ class Bot(commands.Bot):
         change song data in the request for a given user
         """
         print("request awaited")
-        cmd_arg = ctx.message.content.split(" ", maxsplit=1)[1]
+        message = str(ctx.message.content)
+        cmd_arg = message.split(" ", maxsplit=1)[1]
         song = songs.get(int(cmd_arg))
         message: str
         if song:
-            current = False
-            prio = False
+            waiting = True
+            non_prio = True
             moment = time.time()
             requestee = str(ctx.author.name)
 
-            if idx := get_index_for_user(requestee) is not None:
-                request_tuple = (current, prio, queue[idx][2], song, requestee)
-                queue[idx] = request_tuple
+            if (request := get_request_for_user(requestee)) is not None:
+                request_tuple = (request[0], request[1], request[2], song, requestee)
+                queue.append(request_tuple)
+                queue.remove(request)
+                queue.sort()
                 message = (
                     f"@{ctx.author.name}: Dein Request wurde aktualisert zu {song}"
                 )
             else:
-                request_tuple = (current, prio, moment, song, requestee)
+                request_tuple = (waiting, non_prio, moment, song, requestee)
                 queue.append(request_tuple)
                 message = (
                     f"@{ctx.author.name}: Dein Request für {song} ist eingetragen."
@@ -160,16 +191,21 @@ class Bot(commands.Bot):
         else:
             print(f"song {song} not found")
             message = f"@{ctx.author.name} konnte keinen Song für {ctx.message} finden"
+        print(message)
         await ctx.send(message)
 
     @commands.command()
     async def upgrade_request(self, ctx: commands.Context):
         if ctx.author.is_mod:
-            cmd_arg = ctx.message.content.split(" ", maxsplit=1)[1:]
-            
-            if idx := get_index_for_user(cmd_arg) is not None:
-                request = queue[idx]
-                queue[idx] = (request[0], True, request[2], request[3], request[4])
+            print("upgrade awaited")
+            command = str(ctx.message.content)
+            cmd_arg = command.split(" ", maxsplit=1)[1]
+            if cmd_arg.startswith("@"):
+                cmd_arg = cmd_arg[1:]
+
+            if (request := get_request_for_user(cmd_arg)) is not None:
+                queue.append((request[0], False, request[2], request[3], request[4]))
+                queue.remove(request)
                 queue.sort()
                 safe_queue()
                 print(f"Der Request von {request[-1]} hat jetzt prio")
@@ -186,8 +222,8 @@ class Bot(commands.Bot):
 
     @commands.command()
     async def position(self, ctx: commands.Context):
-        if (idx := get_index_for_user(ctx.message.author.name)) is not None:
-            message = f"Dein Request ist aktuell auf Platz {idx} in der Warteschlange"
+        if (idx := get_index_for_user(str(ctx.message.author.name))) is not None:
+            message = f"Dein Request {queue[idx-1][-2]} ist aktuell auf Platz {idx} in der Warteschlange"
         else:
             message = "Du hast anscheinend gar keinen Song in der Warteschlange"
         await ctx.send(f"@{ctx.message.author.name}: {message}")
@@ -195,13 +231,22 @@ class Bot(commands.Bot):
     @commands.command()
     async def next(self, ctx: commands.Context):
         if ctx.author.is_mod:
-            top_song = queue[0]
-            if top_song[0]:
-                queue.remove(top_song)
-            new_top = queue[0]
-            queue[0] = (True,) + new_top[1:]
-            safe_queue()
-            message = f"Nächster Song: {new_top[-2]} requestet von {new_top[-1]}"
+            if len(queue) > 0:
+                top_song = queue[0]
+                if not top_song[0]:
+                    # [0] is waiting -> not waiting -> song was active
+                    queue.remove(top_song)
+                if len(queue) > 0:
+                    new_top = queue[0]
+                    queue[0] = (False,) + new_top[1:]
+                    safe_queue()
+                    message = (
+                        f"Nächster Song: {new_top[-2]} requestet von {new_top[-1]}"
+                    )
+                else:
+                    message = "Queue leer, säd"
+            else:
+                message = "Queue leer, säd"
             print(message)
             await ctx.send(message)
         else:
@@ -210,11 +255,14 @@ class Bot(commands.Bot):
     @commands.command()
     async def randomize(self, ctx: commands.Context):
         if ctx.author.is_mod:
+            if len(queue) == 0:
+                return
             top_song = queue[0]
-            if top_song[0]:
+            if not top_song[0]:
+                # [0] is waiting -> not waiting -> song was active
                 queue.remove(top_song)
             new_top = random.choice(queue)
-            queue[0] = (True,) + new_top[1:]
+            queue.insert(0, (False,) + new_top[1:])
             message = f"Nächster Song: {new_top[-2]} requestet von {new_top[-1]}"
             queue.remove(new_top)
             safe_queue()
@@ -225,17 +273,33 @@ class Bot(commands.Bot):
 
     @commands.command()
     async def scam(self, ctx: commands.Context):
-        cmd_arg = ctx.message.content.split(" ", maxsplit=1)[1:]
-        idx = int(cmd_arg)
+        print("Scam awaited")
+        message = str(ctx.message.content)
+        cmd_arg = message.split(" ", maxsplit=1)[1]
+
+        try:
+            idx = int(cmd_arg) - 1
+        except ValueError:
+            print(f"{cmd_arg} nach int casten nicht so die Idee.")
+            await ctx.send(f"{cmd_arg} ist anscheinend keine Zahl")
+            return
+        
+        if idx >= len(queue):
+            await ctx.send(f"@{ctx.author.name}: So lang ist Queue nicht. Upsi")
+            return
         if ctx.author.is_mod:
-            top_song = queue[0]
-            if top_song[0]:
-                queue.remove(top_song)
-            new_top = queue[idx]
-            queue[0] = (True,) + new_top[1:]
-            message = f"Nächster Song: {new_top[-2]} requestet von {new_top[-1]}"
-            queue.remove(new_top)
-            safe_queue()
+            if len(queue) > 0:
+                top_song = queue[0]
+                if not top_song[0]:
+                    # [0] is waiting -> not waiting -> song was active
+                    queue.remove(top_song)
+                new_top = queue[idx - 1]
+                queue.remove(new_top)
+                queue.insert(0, (False,) + new_top[1:])
+                message = f"Nächster Song: {new_top[-2]} requestet von {new_top[-1]}"
+                safe_queue()
+            else:
+                message = "Queue leer, säd"
             print(message)
             await ctx.send(message)
         else:
@@ -244,13 +308,17 @@ class Bot(commands.Bot):
     @commands.command()
     async def help(self, ctx: commands.Context):
         await ctx.send(
-            f"1: Song unter {songs_url} finden. 2: Request-Befehl kopieren. 3. Request-Befehl im Chat einfügen."
+            f"1: Song unter {songs_url} finden. "
+            "2: Request-Befehl kopieren. "
+            "3: Request-Befehl im Chat einfügen."
         )
 
     @commands.command()
     async def rules(self, ctx: commands.Context):
         await ctx.send(
-            "1: Request kostet nichts. 2: 1 verschenkter Sub: wir schieben deinen Request hoch. 3. Iron Maiden und Dragonforce nur für eine Dono von Mindestens 25 €."
+            "1: Request kostet nichts. "
+            "2: 2 verschenkter Subs: wir schieben deinen Request hoch. "
+            "3. Iron Maiden und Dragonforce nur für eine Dono von Mindestens 25 €."
         )
 
     @commands.command()
