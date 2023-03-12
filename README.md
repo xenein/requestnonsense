@@ -11,13 +11,13 @@ let's request some songs in twitch channels you do not need to own
 6. get twitch chat bot token via https://twitchtokengenerator.com/
 7. get hackmd.io api token
 8. put api tokens in .env
-9. get songlist csv - (customs forge song manager will create one for you)
-10. python requestnonsense.py```
+9. build songlist csv - (customs forge song manager will create one for you)
+10. `python requestnonsense.py`
 
 ## songlist csv format
 
 Customs Forge Song Manager CSV-Format starts with a line denoting the delimiter.
-We always assume ";" and skip over the first line. If you don't use CFSM, include a blank line in your csv first.
+We always assume ";" and skip over the first line. If you don't use CFSM, include a blank line in your csv first. (This might chance, keep an eye on here)
 
 We rely on Columns "Artist", "Title" and "Arrangements" in songlist, additional columns are ignored.
 If your csv does not have arrangements, you can go with `INSTRUMENTS=` in .env - this will simply use all songs.
