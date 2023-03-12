@@ -14,7 +14,7 @@ if you send another, you keep your place in the queue, song is changed though
 the list of available songs as well as the current queue are pushed to hackmd-notes
 """
 
-from decouple import config
+from decouple import config, Csv
 from twitchio.ext import commands
 import csv
 import pickle
@@ -23,11 +23,13 @@ import requests
 import time
 import os
 
-hackmdtags = "---\ntags: config('HACKMDTAG', default='requestnonsense')\n---"
+hackmdtags = f"---\ntags: {config('HACKMDTAG', default='requestnonsense')}\n---"
+hackmdheaders = {"Authorization": f"Bearer {config('HACKMDTOKEN')}"}
+
+instruments = config('INSTRUMENTS', cast=Csv(), default=[])
 
 
 def create_note(content: str) -> str:
-    headers = {"Authorization": f"Bearer {config('HACKMDTOKEN')}"}
     payload = {
         "readPermission": "guest",
         "writePermission": "owner",
@@ -36,14 +38,13 @@ def create_note(content: str) -> str:
     }
 
     _response = requests.post(
-        "https://api.hackmd.io/v1/notes", headers=headers, json=payload
+        "https://api.hackmd.io/v1/notes", headers=hackmdheaders, json=payload
     )
     return f"https://hackmd.io/{_response.json().get('id')}"
 
 
 def update_note(content: str, note_url: str) -> bool:
     note_id = note_url.split("/")[-1]
-    headers = {"Authorization": f"Bearer {config('HACKMDTOKEN')}"}
     payload = {
         "readPermission": "guest",
         "writePermission": "owner",
@@ -52,7 +53,7 @@ def update_note(content: str, note_url: str) -> bool:
     }
 
     _response = requests.patch(
-        f"https://api.hackmd.io/v1/notes/{note_id}", headers=headers, json=payload
+        f"https://api.hackmd.io/v1/notes/{note_id}", headers=hackmdheaders, json=payload
     )
 
     return _response.status_code == 202
@@ -89,10 +90,13 @@ if os.path.exists(config("SONGLIST")):
         csv_lines = fh.readlines()[1:]
     reader = csv.DictReader(csv_lines, delimiter=";")
 
-    # TODO: select arrangements via decouple
     song_set = set()
     for line in reader:
-        if "Bass" in str(line.get("Arrangements")):
+        if instruments:
+            for instrument in instruments:
+                if instrument in str(line.get("Arrangements")):
+                    song_set.add((line.get("Artist"), line.get("Title")))
+        else:
             song_set.add((line.get("Artist"), line.get("Title")))
 
     song_list = list(song_set)
@@ -278,7 +282,7 @@ class Bot(commands.Bot):
         cmd_arg = message.split(" ", maxsplit=1)[1]
 
         try:
-            idx = int(cmd_arg) - 1
+            idx = int(cmd_arg)
         except ValueError:
             print(f"{cmd_arg} nach int casten nicht so die Idee.")
             await ctx.send(f"{cmd_arg} ist anscheinend keine Zahl")
