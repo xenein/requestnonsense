@@ -3,7 +3,7 @@ let's request some songs in twitch channels you do not need to own
 
 ## get started
 
-1. clone
+1. git clone
 2. `python -m venv venv`
 3. `source venv/bin/activate`
 4. `pip install -r requirements.txt`
@@ -17,7 +17,8 @@ let's request some songs in twitch channels you do not need to own
 ## songlist csv format
 
 Customs Forge Song Manager CSV-Format starts with a line denoting the delimiter.
-We always assume ";" and skip over the first line. If you don't use CFSM, include a blank line in your csv first. (This might chance, keep an eye on here)
+CFSM uses the first line in the csv file to denote the delimiter (usually ";").
+Check LIST_DELIMITER and LIST_CFSM in example.env. 
 
 We rely on Columns "Artist", "Title" and "Arrangements" in songlist, additional columns are ignored.
 If your csv does not have arrangements, you can go with `INSTRUMENTS=` in .env - this will simply use all songs.
@@ -30,7 +31,7 @@ If your csv does not have arrangements, you can go with `INSTRUMENTS=` in .env -
 
 ## so what can you do?
 
-everything happens in twitchchat. Commands may start with ! or ?. 
+everything happens in twitchchat. Commands may start with ! or ?. (you can set any string prefix with BOT_PREFIX in .env)
 
 ### Everyone can:
 

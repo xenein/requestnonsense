@@ -16,7 +16,7 @@ the list of available songs as well as the current queue are pushed to hackmd-no
 
 from decouple import config, Csv
 from twitchio.ext import commands
-from typing import NamedTuple
+from typing import NamedTuple, TypedDict
 
 import csv
 import pickle
@@ -26,10 +26,40 @@ import time
 import os
 
 # config
-hackmdtags = f"---\ntags: {config('HACKMDTAG', default='requestnonsense')}\n---"
-hackmdheaders = {"Authorization": f"Bearer {config('HACKMDTOKEN')}"}
+HackMDConfig = TypedDict(
+    "HackMDConfig",
+    {
+        "tags": str,
+        "headers": dict[str, str],
+        "endpoint": str,
+        "payload": dict[str, str],
+        "queueTitle": str,
+        "listTitle": str,
+    },
+)
+HACKMD_CONFIG = HackMDConfig(
+    tags=f"---\ntags: {config('HACKMDTAG', default='requestnonsense')}\n---",
+    headers={"Authorization": f"Bearer {config('HACKMDTOKEN')}"},
+    endpoint="https://hackmd.io/v1/notes/",
+    payload={
+        "readPermission": "guest",
+        "writePermission": "owner",
+        "commentPermission": "disabled",
+    },
+    queueTitle=str(config("QUEUETITLE", default="Queue")),
+    listTitle=str(config("LISTTITLE", default="List")),
+)
 
-instruments = config("INSTRUMENTS", cast=Csv(), default=[])
+
+ListConfig = TypedDict(
+    "ListConfig", {"delimiter": str, "CFSM": bool, "instruments": list, "path": str}
+)
+LIST_CONFIG = ListConfig(
+    delimiter=str(config("LIST_DELIMITER", default=";")),
+    CFSM=bool(config("LIST_CFSM", cast=bool)),
+    instruments=config("INSTRUMENTS", cast=Csv(), default=[]),  # type: ignore
+    path=str(config("SONGLIST", default="./songlist.csv")),
+)
 
 
 # request-tuples
@@ -45,14 +75,14 @@ class RequestTuple(NamedTuple):
 
 def create_note(content: str) -> str:
     payload = {
-        "readPermission": "guest",
-        "writePermission": "owner",
-        "commentPermission": "disabled",
         "content": content,
     }
+    payload.update(HACKMD_CONFIG.get("payload"))
 
     _response = requests.post(
-        "https://api.hackmd.io/v1/notes", headers=hackmdheaders, json=payload
+        HACKMD_CONFIG.get("endpoint"),
+        headers=HACKMD_CONFIG.get("headers"),
+        json=payload,
     )
     return f"https://hackmd.io/{_response.json().get('id')}"
 
@@ -60,14 +90,14 @@ def create_note(content: str) -> str:
 def update_note(content: str, note_url: str) -> bool:
     note_id = note_url.split("/")[-1]
     payload = {
-        "readPermission": "guest",
-        "writePermission": "owner",
-        "commentPermission": "disabled",
         "content": content,
     }
+    payload.update(HACKMD_CONFIG.get("payload"))
 
     _response = requests.patch(
-        f"https://api.hackmd.io/v1/notes/{note_id}", headers=hackmdheaders, json=payload
+        f"{HACKMD_CONFIG.get('endpoint')}{note_id}",
+        headers=HACKMD_CONFIG.get("headers"),
+        json=payload,
     )
 
     return _response.status_code == 202
@@ -75,9 +105,9 @@ def update_note(content: str, note_url: str) -> bool:
 
 def generate_requests_markdown(queue: list[RequestTuple]) -> str:
     if len(queue) == 0:
-        return f"{hackmdtags}# {config('QUEUETITLE', default='Queue')}\n Beeindruckend leer hier"
+        return f"{HACKMD_CONFIG.get('tags')}# {HACKMD_CONFIG.get('queueTitle')}\n Beeindruckend leer hier"
     requests_markdown = [
-        f"{hackmdtags}# {config('QUEUETITLE', default='Queue')}",
+        f"{HACKMD_CONFIG.get('tags')}# {HACKMD_CONFIG.get('queueTitle')}",
         "",
         "| Pos | Song | User |",
         "| --- | --- | --- |",
@@ -90,7 +120,7 @@ def generate_requests_markdown(queue: list[RequestTuple]) -> str:
 
 queue: list[RequestTuple] = []
 requests_url = create_note(
-    f"{hackmdtags}# {config('QUEUETITLE', default='Queue')}\n Gerade beeindruckend leer."
+    f"{HACKMD_CONFIG.get('tags')}# {HACKMD_CONFIG.get('queueTitle')}\n Gerade beeindruckend leer."
 )
 if os.path.exists(config("QUEUE_FILE")):
     with open(config("QUEUE_FILE"), mode="rb") as fh:
@@ -99,14 +129,15 @@ if os.path.exists(config("QUEUE_FILE")):
 
 songs = dict()
 songs_url = ""
-if os.path.exists(config("SONGLIST")):
-    with open(config("SONGLIST")) as fh:
-        csv_lines = fh.readlines()[1:]
-    reader = csv.DictReader(csv_lines, delimiter=";")
+if os.path.exists(LIST_CONFIG.get("path")):
+    with open(LIST_CONFIG.get("path")) as fh:
+        start = 1 if LIST_CONFIG.get("CFSM") else 0
+        csv_lines = fh.readlines()[start:]
+    reader = csv.DictReader(csv_lines, delimiter=LIST_CONFIG.get("delimiter"))
 
     song_set = set()
     for line in reader:
-        if instruments:
+        if instruments := LIST_CONFIG.get("instruments"):
             for instrument in str(instruments):
                 if instrument in str(line.get("Arrangements")):
                     song_set.add((line.get("Artist"), line.get("Title")))
@@ -119,8 +150,8 @@ if os.path.exists(config("SONGLIST")):
         songs[idx] = f"{song[0]} - {song[1]}"
 
     songlist_markdown = [
-        hackmdtags,
-        f"""# {config("LISTTITLE", default="List")}
+        HACKMD_CONFIG.get("tags"),
+        f"""# {HACKMD_CONFIG.get("listTitle")}
 
 Such dir einen Song raus, kopier das Request-Command und fügs im Chat ein.
 
@@ -137,14 +168,14 @@ Such dir einen Song raus, kopier das Request-Command und fügs im Chat ein.
 
 def get_index_for_user(user: str) -> int | None:
     for idx, entry in enumerate(queue, start=1):
-        if entry[-1] == user:
+        if entry.requestee == user:
             return idx
     return None
 
 
 def get_request_for_user(user: str) -> RequestTuple | None:
     for entry in queue:
-        if entry[-1] == user:
+        if entry.requestee == user:
             return entry
     return None
 
@@ -156,12 +187,21 @@ def safe_queue():
 
 
 class Bot(commands.Bot):
+    message_prefix: str = ""
+
     def __init__(self):
         super().__init__(
             token=str(config("ACCESS_TOKEN")),
             prefix=config("BOT_PREFIX", cast=Csv(post_process=list), default="?,!"),  # type: ignore
             initial_channels=[config("CHANNEL")],
         )
+        self.message_prefix = str(config("MESSAGE_PREFIX"))
+
+    async def send_message(self, ctx: commands.Context, message: str):
+        if self.message_prefix:
+            await ctx.send(f"{self.message_prefix}: {message}")
+        else:
+            await ctx.send(message)
 
     async def event_ready(self):
         print(f"Logged in as: {self.nick}")
@@ -171,7 +211,7 @@ class Bot(commands.Bot):
     @commands.command()
     async def meow(self, ctx: commands.Context):
         print("meow awaited")
-        await ctx.send("meow!")
+        await self.send_message(ctx, "meow!")
 
     @commands.command()
     async def request(self, ctx: commands.Context):
@@ -216,7 +256,7 @@ class Bot(commands.Bot):
             print(f"song {song} not found")
             message = f"@{ctx.author.name} konnte keinen Song für {ctx.message} finden"
         print(message)
-        await ctx.send(message)
+        await self.send_message(ctx, message)
 
     @commands.command()
     async def upgrade_request(self, ctx: commands.Context):
@@ -241,16 +281,20 @@ class Bot(commands.Bot):
                 queue.sort()
                 safe_queue()
                 print(f"Der Request von {request.requestee} hat jetzt prio")
-                await ctx.send(
-                    f"@{ctx.author.name}: Der Request von {request.requestee} hat jetzt prio"
+                await self.send_message(
+                    ctx,
+                    f"@{ctx.author.name}: Der Request von {request.requestee} hat jetzt prio",
                 )
             else:
                 print(f"{cmd_arg} hat keine Request in der Warteschlange")
-                await ctx.send(
-                    f"@{ctx.author.name}: {cmd_arg} hat keine Request in der Warteschlange"
+                await self.send_message(
+                    ctx,
+                    f"@{ctx.author.name}: {cmd_arg} hat keine Request in der Warteschlange",
                 )
         else:
-            await ctx.send(f"@{ctx.author.name}: Das ist ein Mod-Only-Befehl")
+            await self.send_message(
+                ctx, f"@{ctx.author.name}: Das ist ein Mod-Only-Befehl"
+            )
 
     @commands.command()
     async def position(self, ctx: commands.Context):
@@ -258,7 +302,7 @@ class Bot(commands.Bot):
             message = f"Dein Request {queue[idx-1].song} ist aktuell auf Platz {idx} in der Warteschlange"
         else:
             message = "Du hast anscheinend gar keinen Song in der Warteschlange"
-        await ctx.send(f"@{ctx.message.author.name}: {message}")
+        await self.send_message(ctx, f"@{ctx.message.author.name}: {message}")
 
     @commands.command()
     async def next(self, ctx: commands.Context):
@@ -284,9 +328,11 @@ class Bot(commands.Bot):
             else:
                 message = "Queue leer, säd"
             print(message)
-            await ctx.send(message)
+            await self.send_message(ctx, message)
         else:
-            await ctx.send(f"@{ctx.author.name}: Das ist ein Mod-Only-Befehl")
+            await self.send_message(
+                ctx, f"@{ctx.author.name}: Das ist ein Mod-Only-Befehl"
+            )
 
     @commands.command()
     async def randomize(self, ctx: commands.Context):
@@ -312,9 +358,11 @@ class Bot(commands.Bot):
             queue.remove(new_top)
             safe_queue()
             print(message)
-            await ctx.send(message)
+            await self.send_message(ctx, message)
         else:
-            await ctx.send(f"@{ctx.author.name}: Das ist ein Mod-Only-Befehl")
+            await self.send_message(
+                ctx, f"@{ctx.author.name}: Das ist ein Mod-Only-Befehl"
+            )
 
     @commands.command()
     async def scam(self, ctx: commands.Context):
@@ -326,11 +374,13 @@ class Bot(commands.Bot):
             idx = int(cmd_arg)
         except ValueError:
             print(f"{cmd_arg} nach int casten nicht so die Idee.")
-            await ctx.send(f"{cmd_arg} ist anscheinend keine Zahl")
+            await self.send_message(ctx, f"{cmd_arg} ist anscheinend keine Zahl")
             return
 
         if idx >= len(queue):
-            await ctx.send(f"@{ctx.author.name}: So lang ist Queue nicht. Upsi")
+            await self.send_message(
+                ctx, f"@{ctx.author.name}: So lang ist Queue nicht. Upsi"
+            )
             return
         if ctx.author.is_mod:
             if len(queue) > 0:
@@ -348,36 +398,44 @@ class Bot(commands.Bot):
                         new_top.timestamp,
                         new_top.song,
                         new_top.requestee,
-                    )
+                    ),
                 )
-                message = f"Nächster Song: {new_top.song} requestet von {new_top.requestee}"
+                message = (
+                    f"Nächster Song: {new_top.song} requestet von {new_top.requestee}"
+                )
                 safe_queue()
             else:
                 message = "Queue leer, säd"
             print(message)
-            await ctx.send(message)
+            await self.send_message(ctx, message)
         else:
-            await ctx.send(f"@{ctx.author.name}: Das ist ein Mod-Only-Befehl")
+            await self.send_message(
+                ctx, f"@{ctx.author.name}: Das ist ein Mod-Only-Befehl"
+            )
 
     @commands.command()
     async def help(self, ctx: commands.Context):
-        await ctx.send(
+        await self.send_message(
+            ctx,
             f"1: Song unter {songs_url} finden. "
             "2: Request-Befehl kopieren. "
-            "3: Request-Befehl im Chat einfügen."
+            "3: Request-Befehl im Chat einfügen.",
         )
 
     @commands.command()
     async def rules(self, ctx: commands.Context):
-        await ctx.send(
+        await self.send_message(
+            ctx,
             "1: Request kostet nichts. "
             "2: 2 verschenkter Subs: wir schieben deinen Request hoch. "
-            "3. Iron Maiden und Dragonforce nur für eine Dono von Mindestens 25 €."
+            "3. Iron Maiden und Dragonforce nur für eine Dono von Mindestens 25 €.",
         )
 
     @commands.command()
     async def allrequests(self, ctx: commands.Context):
-        await ctx.send(f"die gesamte Warteschlange gibts unter {requests_url}")
+        await self.send_message(
+            ctx, f"die gesamte Warteschlange gibts unter {requests_url}"
+        )
 
 
 if __name__ == "__main__":
