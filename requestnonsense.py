@@ -159,7 +159,7 @@ class Bot(commands.Bot):
     def __init__(self):
         super().__init__(
             token=str(config("ACCESS_TOKEN")),
-            prefix=["?", "!"],
+            prefix=config("BOT_PREFIX", cast=Csv(post_process=list), default="?,!"),  # type: ignore
             initial_channels=[config("CHANNEL")],
         )
 
