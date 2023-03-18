@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-so, requests are tuples.
+so, requests are NamedTuples.
 like so (waiting: bool, non_prio: bool, timestamp: float, song: str, requestee: str)
 waiting is opposite of current, non_prio <-> prio
 we put them in a list. why?
@@ -16,6 +16,8 @@ the list of available songs as well as the current queue are pushed to hackmd-no
 
 from decouple import config, Csv
 from twitchio.ext import commands
+from typing import NamedTuple
+
 import csv
 import pickle
 import random
@@ -23,10 +25,22 @@ import requests
 import time
 import os
 
+# config
 hackmdtags = f"---\ntags: {config('HACKMDTAG', default='requestnonsense')}\n---"
 hackmdheaders = {"Authorization": f"Bearer {config('HACKMDTOKEN')}"}
 
-instruments = config('INSTRUMENTS', cast=Csv(), default=[])
+instruments = config("INSTRUMENTS", cast=Csv(), default=[])
+
+
+# request-tuples
+class RequestTuple(NamedTuple):
+    """Requests are handled in tuples. Fields within requests can be accessed by name, too"""
+
+    waiting: bool
+    non_prio: bool
+    timestamp: float
+    song: str
+    requestee: str
 
 
 def create_note(content: str) -> str:
@@ -59,7 +73,7 @@ def update_note(content: str, note_url: str) -> bool:
     return _response.status_code == 202
 
 
-def generate_requests_markdown(queue: list) -> str:
+def generate_requests_markdown(queue: list[RequestTuple]) -> str:
     if len(queue) == 0:
         return f"{hackmdtags}# {config('QUEUETITLE', default='Queue')}\n Beeindruckend leer hier"
     requests_markdown = [
@@ -69,12 +83,12 @@ def generate_requests_markdown(queue: list) -> str:
         "| --- | --- | --- |",
     ]
     for idx, request in enumerate(queue, start=1):
-        requests_markdown.append(f"| {idx} | {request[-2]} | {request[-1]} |")
+        requests_markdown.append(f"| {idx} | {request.song} | {request.requestee} |")
 
     return "\n".join(requests_markdown)
 
 
-queue = []
+queue: list[RequestTuple] = []
 requests_url = create_note(
     f"{hackmdtags}# {config('QUEUETITLE', default='Queue')}\n Gerade beeindruckend leer."
 )
@@ -93,7 +107,7 @@ if os.path.exists(config("SONGLIST")):
     song_set = set()
     for line in reader:
         if instruments:
-            for instrument in instruments:
+            for instrument in str(instruments):
                 if instrument in str(line.get("Arrangements")):
                     song_set.add((line.get("Artist"), line.get("Title")))
         else:
@@ -128,7 +142,7 @@ def get_index_for_user(user: str) -> int | None:
     return None
 
 
-def get_request_for_user(user: str) -> tuple | None:
+def get_request_for_user(user: str) -> RequestTuple | None:
     for entry in queue:
         if entry[-1] == user:
             return entry
@@ -177,7 +191,13 @@ class Bot(commands.Bot):
             requestee = str(ctx.author.name)
 
             if (request := get_request_for_user(requestee)) is not None:
-                request_tuple = (request[0], request[1], request[2], song, requestee)
+                request_tuple = RequestTuple(
+                    request.waiting,
+                    request.non_prio,
+                    request.timestamp,
+                    song,
+                    requestee,
+                )
                 queue.append(request_tuple)
                 queue.remove(request)
                 queue.sort()
@@ -185,7 +205,7 @@ class Bot(commands.Bot):
                     f"@{ctx.author.name}: Dein Request wurde aktualisert zu {song}"
                 )
             else:
-                request_tuple = (waiting, non_prio, moment, song, requestee)
+                request_tuple = RequestTuple(waiting, non_prio, moment, song, requestee)
                 queue.append(request_tuple)
                 message = (
                     f"@{ctx.author.name}: Dein Request für {song} ist eingetragen."
@@ -208,13 +228,21 @@ class Bot(commands.Bot):
                 cmd_arg = cmd_arg[1:]
 
             if (request := get_request_for_user(cmd_arg)) is not None:
-                queue.append((request[0], False, request[2], request[3], request[4]))
+                queue.append(
+                    RequestTuple(
+                        request.waiting,
+                        False,
+                        request.timestamp,
+                        request.song,
+                        request.requestee,
+                    )
+                )
                 queue.remove(request)
                 queue.sort()
                 safe_queue()
-                print(f"Der Request von {request[-1]} hat jetzt prio")
+                print(f"Der Request von {request.requestee} hat jetzt prio")
                 await ctx.send(
-                    f"@{ctx.author.name}: Der Request von {request[-1]} hat jetzt prio"
+                    f"@{ctx.author.name}: Der Request von {request.requestee} hat jetzt prio"
                 )
             else:
                 print(f"{cmd_arg} hat keine Request in der Warteschlange")
@@ -227,7 +255,7 @@ class Bot(commands.Bot):
     @commands.command()
     async def position(self, ctx: commands.Context):
         if (idx := get_index_for_user(str(ctx.message.author.name))) is not None:
-            message = f"Dein Request {queue[idx-1][-2]} ist aktuell auf Platz {idx} in der Warteschlange"
+            message = f"Dein Request {queue[idx-1].song} ist aktuell auf Platz {idx} in der Warteschlange"
         else:
             message = "Du hast anscheinend gar keinen Song in der Warteschlange"
         await ctx.send(f"@{ctx.message.author.name}: {message}")
@@ -237,16 +265,20 @@ class Bot(commands.Bot):
         if ctx.author.is_mod:
             if len(queue) > 0:
                 top_song = queue[0]
-                if not top_song[0]:
-                    # [0] is waiting -> not waiting -> song was active
+                if not top_song.waiting:
+                    # not waiting -> song was active
                     queue.remove(top_song)
                 if len(queue) > 0:
                     new_top = queue[0]
-                    queue[0] = (False,) + new_top[1:]
-                    safe_queue()
-                    message = (
-                        f"Nächster Song: {new_top[-2]} requestet von {new_top[-1]}"
+                    queue[0] = RequestTuple(
+                        False,
+                        new_top.non_prio,
+                        new_top.timestamp,
+                        new_top.song,
+                        new_top.requestee,
                     )
+                    safe_queue()
+                    message = f"Nächster Song: {new_top.song} requestet von {new_top.requestee}"
                 else:
                     message = "Queue leer, säd"
             else:
@@ -266,8 +298,17 @@ class Bot(commands.Bot):
                 # [0] is waiting -> not waiting -> song was active
                 queue.remove(top_song)
             new_top = random.choice(queue)
-            queue.insert(0, (False,) + new_top[1:])
-            message = f"Nächster Song: {new_top[-2]} requestet von {new_top[-1]}"
+            queue.insert(
+                0,
+                RequestTuple(
+                    False,
+                    new_top.non_prio,
+                    new_top.timestamp,
+                    new_top.song,
+                    new_top.requestee,
+                ),
+            )
+            message = f"Nächster Song: {new_top.song} requestet von {new_top.requestee}"
             queue.remove(new_top)
             safe_queue()
             print(message)
@@ -287,7 +328,7 @@ class Bot(commands.Bot):
             print(f"{cmd_arg} nach int casten nicht so die Idee.")
             await ctx.send(f"{cmd_arg} ist anscheinend keine Zahl")
             return
-        
+
         if idx >= len(queue):
             await ctx.send(f"@{ctx.author.name}: So lang ist Queue nicht. Upsi")
             return
@@ -299,8 +340,17 @@ class Bot(commands.Bot):
                     queue.remove(top_song)
                 new_top = queue[idx - 1]
                 queue.remove(new_top)
-                queue.insert(0, (False,) + new_top[1:])
-                message = f"Nächster Song: {new_top[-2]} requestet von {new_top[-1]}"
+                queue.insert(
+                    0,
+                    RequestTuple(
+                        False,
+                        new_top.non_prio,
+                        new_top.timestamp,
+                        new_top.song,
+                        new_top.requestee,
+                    )
+                )
+                message = f"Nächster Song: {new_top.song} requestet von {new_top.requestee}"
                 safe_queue()
             else:
                 message = "Queue leer, säd"
