@@ -40,7 +40,7 @@ HackMDConfig = TypedDict(
 HACKMD_CONFIG = HackMDConfig(
     tags=f"---\ntags: {config('HACKMDTAG', default='requestnonsense')}\n---",
     headers={"Authorization": f"Bearer {config('HACKMDTOKEN')}"},
-    endpoint="https://hackmd.io/v1/notes/",
+    endpoint="https://api.hackmd.io/v1/notes/",
     payload={
         "readPermission": "guest",
         "writePermission": "owner",
@@ -138,7 +138,7 @@ if os.path.exists(LIST_CONFIG.get("path")):
     song_set = set()
     for line in reader:
         if instruments := LIST_CONFIG.get("instruments"):
-            for instrument in str(instruments):
+            for instrument in instruments:
                 if instrument in str(line.get("Arrangements")):
                     song_set.add((line.get("Artist"), line.get("Title")))
         else:
@@ -206,7 +206,7 @@ class Bot(commands.Bot):
     async def event_ready(self):
         print(f"Logged in as: {self.nick}")
         print(f"User id: {self.user_id}")
-        await self.connected_channels[0].send("Requestnonse bereit")
+        await self.connected_channels[0].send("Requestnonsense bereit")
 
     @commands.command()
     async def meow(self, ctx: commands.Context):
@@ -268,6 +268,7 @@ class Bot(commands.Bot):
                 cmd_arg = cmd_arg[1:]
 
             if (request := get_request_for_user(cmd_arg)) is not None:
+                queue.remove(request)
                 queue.append(
                     RequestTuple(
                         request.waiting,
@@ -277,7 +278,6 @@ class Bot(commands.Bot):
                         request.requestee,
                     )
                 )
-                queue.remove(request)
                 queue.sort()
                 safe_queue()
                 print(f"Der Request von {request.requestee} hat jetzt prio")
@@ -324,8 +324,10 @@ class Bot(commands.Bot):
                     safe_queue()
                     message = f"Nächster Song: {new_top.song} requestet von {new_top.requestee}"
                 else:
+                    safe_queue()
                     message = "Queue leer, säd"
             else:
+                safe_queue()
                 message = "Queue leer, säd"
             print(message)
             await self.send_message(ctx, message)
@@ -428,7 +430,7 @@ class Bot(commands.Bot):
             ctx,
             "1: Request kostet nichts. "
             "2: 2 verschenkter Subs: wir schieben deinen Request hoch. "
-            "3. Iron Maiden und Dragonforce nur für eine Dono von Mindestens 25 €.",
+            "3. Iron Maiden und Dragonforce nur für eine Dono für Kora von Mindestens 25 €.",
         )
 
     @commands.command()
