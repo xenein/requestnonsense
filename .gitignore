@@ -131,3 +131,4 @@ dmypy.json
 # prject files
 songlist.csv
 queue.bin
+.DS_STORE
