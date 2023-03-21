@@ -3,8 +3,9 @@
 so, requests are NamedTuples.
 like so (waiting: bool, non_prio: bool, timestamp: float, song: str, requestee: str)
 waiting is opposite of current, non_prio <-> prio
-we put them in a list. why?
+we put them in a glorified list. why?
 we can use .sort() and get it nicely ordered
+we put a class around it, so we can sneak sqlite in
 
 what else?
 everyone in chat can request
@@ -73,6 +74,79 @@ class RequestTuple(NamedTuple):
     requestee: str
 
 
+class RequestQueue:
+    """wir machen jetzt alberne Tricks, um die Queue irgendwann in sqlite zu haben. yay"""
+
+    data: list[RequestTuple]
+    url: str
+
+    def __init__(self):
+        self.url = create_note("")
+        if os.path.exists(config("QUEUE_FILE")):
+            with open(config("QUEUE_FILE"), mode="rb") as fh:
+                self.data = pickle.load(fh)
+        else:
+            self.data = list()
+        update_note(self.generate_requests_markdown(), self.url)
+
+    def append(self, item: RequestTuple):
+        self.data.append(item)
+
+    def insert(self, position: int, item: RequestTuple):
+        self.data.insert(position, item)
+
+    def remove(self, item: RequestTuple):
+        self.data.remove(item)
+
+    def get_first(self) -> RequestTuple:
+        return self.get_element(0)
+
+    def get_element(self, idx: int) -> RequestTuple:
+        return self.data[idx]
+
+    def get_random(self) -> RequestTuple:
+        return random.choice(self.data)
+
+    def sort(self):
+        self.data.sort()
+
+    def len(self) -> int:
+        return len(self.data)
+
+    def get_index_for_user(self, user: str) -> int | None:
+        for idx, entry in enumerate(self.data, start=1):
+            if entry.requestee == user:
+                return idx
+        return None
+
+    def get_request_for_user(self, user: str) -> RequestTuple | None:
+        for entry in self.data:
+            if entry.requestee == user:
+                return entry
+        return None
+
+    def safe_queue(self):
+        with open(config("QUEUE_FILE"), mode="wb") as fh:
+            pickle.dump(self.data, fh)
+        update_note(self.generate_requests_markdown(), self.url)
+
+    def generate_requests_markdown(self) -> str:
+        if len(self.data) == 0:
+            return f"{HACKMD_CONFIG.get('tags')}# {HACKMD_CONFIG.get('queueTitle')}\n Beeindruckend leer hier"
+        requests_markdown = [
+            f"{HACKMD_CONFIG.get('tags')}# {HACKMD_CONFIG.get('queueTitle')}",
+            "",
+            "| Pos | Song | User |",
+            "| --- | --- | --- |",
+        ]
+        for idx, request in enumerate(self.data, start=1):
+            requests_markdown.append(
+                f"| {idx} | {request.song} | {request.requestee} |"
+            )
+
+        return "\n".join(requests_markdown)
+
+
 def create_note(content: str) -> str:
     payload = {
         "content": content,
@@ -102,30 +176,6 @@ def update_note(content: str, note_url: str) -> bool:
 
     return _response.status_code == 202
 
-
-def generate_requests_markdown(queue: list[RequestTuple]) -> str:
-    if len(queue) == 0:
-        return f"{HACKMD_CONFIG.get('tags')}# {HACKMD_CONFIG.get('queueTitle')}\n Beeindruckend leer hier"
-    requests_markdown = [
-        f"{HACKMD_CONFIG.get('tags')}# {HACKMD_CONFIG.get('queueTitle')}",
-        "",
-        "| Pos | Song | User |",
-        "| --- | --- | --- |",
-    ]
-    for idx, request in enumerate(queue, start=1):
-        requests_markdown.append(f"| {idx} | {request.song} | {request.requestee} |")
-
-    return "\n".join(requests_markdown)
-
-
-queue: list[RequestTuple] = []
-requests_url = create_note(
-    f"{HACKMD_CONFIG.get('tags')}# {HACKMD_CONFIG.get('queueTitle')}\n Gerade beeindruckend leer."
-)
-if os.path.exists(config("QUEUE_FILE")):
-    with open(config("QUEUE_FILE"), mode="rb") as fh:
-        queue = pickle.load(fh)
-    update_note(generate_requests_markdown(queue), requests_url)
 
 songs = dict()
 songs_url = ""
@@ -166,28 +216,9 @@ Such dir einen Song raus, kopier das Request-Command und fügs im Chat ein.
     songs_url = create_note("\n".join(songlist_markdown))
 
 
-def get_index_for_user(user: str) -> int | None:
-    for idx, entry in enumerate(queue, start=1):
-        if entry.requestee == user:
-            return idx
-    return None
-
-
-def get_request_for_user(user: str) -> RequestTuple | None:
-    for entry in queue:
-        if entry.requestee == user:
-            return entry
-    return None
-
-
-def safe_queue():
-    with open(config("QUEUE_FILE"), mode="wb") as fh:
-        pickle.dump(queue, fh)
-    update_note(generate_requests_markdown(queue), requests_url)
-
-
 class Bot(commands.Bot):
     message_prefix: str = ""
+    queue: RequestQueue
 
     def __init__(self):
         super().__init__(
@@ -196,6 +227,7 @@ class Bot(commands.Bot):
             initial_channels=[config("CHANNEL")],
         )
         self.message_prefix = str(config("MESSAGE_PREFIX"))
+        self.queue = RequestQueue()
 
     async def send_message(self, ctx: commands.Context, message: str):
         if self.message_prefix:
@@ -230,7 +262,7 @@ class Bot(commands.Bot):
             moment = time.time()
             requestee = str(ctx.author.name)
 
-            if (request := get_request_for_user(requestee)) is not None:
+            if (request := self.queue.get_request_for_user(requestee)) is not None:
                 request_tuple = RequestTuple(
                     request.waiting,
                     request.non_prio,
@@ -238,20 +270,20 @@ class Bot(commands.Bot):
                     song,
                     requestee,
                 )
-                queue.append(request_tuple)
-                queue.remove(request)
-                queue.sort()
+                self.queue.append(request_tuple)
+                self.queue.remove(request)
+                self.queue.sort()
                 message = (
                     f"@{ctx.author.name}: Dein Request wurde aktualisert zu {song}"
                 )
             else:
                 request_tuple = RequestTuple(waiting, non_prio, moment, song, requestee)
-                queue.append(request_tuple)
+                self.queue.append(request_tuple)
                 message = (
                     f"@{ctx.author.name}: Dein Request für {song} ist eingetragen."
                 )
 
-            safe_queue()
+            self.queue.safe_queue()
         else:
             print(f"song {song} not found")
             message = f"@{ctx.author.name} konnte keinen Song für {ctx.message} finden"
@@ -267,9 +299,9 @@ class Bot(commands.Bot):
             if cmd_arg.startswith("@"):
                 cmd_arg = cmd_arg[1:]
 
-            if (request := get_request_for_user(cmd_arg)) is not None:
-                queue.remove(request)
-                queue.append(
+            if (request := self.queue.get_request_for_user(cmd_arg)) is not None:
+                self.queue.remove(request)
+                self.queue.append(
                     RequestTuple(
                         request.waiting,
                         False,
@@ -278,8 +310,8 @@ class Bot(commands.Bot):
                         request.requestee,
                     )
                 )
-                queue.sort()
-                safe_queue()
+                self.queue.sort()
+                self.queue.safe_queue()
                 print(f"Der Request von {request.requestee} hat jetzt prio")
                 await self.send_message(
                     ctx,
@@ -298,8 +330,10 @@ class Bot(commands.Bot):
 
     @commands.command()
     async def position(self, ctx: commands.Context):
-        if (idx := get_index_for_user(str(ctx.message.author.name))) is not None:
-            message = f"Dein Request {queue[idx-1].song} ist aktuell auf Platz {idx} in der Warteschlange"
+        if (
+            idx := self.queue.get_index_for_user(str(ctx.message.author.name))
+        ) is not None:
+            message = f"Dein Request {self.queue.get_element(idx-1).song} ist aktuell auf Platz {idx} in der Warteschlange"
         else:
             message = "Du hast anscheinend gar keinen Song in der Warteschlange"
         await self.send_message(ctx, f"@{ctx.message.author.name}: {message}")
@@ -307,27 +341,33 @@ class Bot(commands.Bot):
     @commands.command()
     async def next(self, ctx: commands.Context):
         if ctx.author.is_mod:
-            if len(queue) > 0:
-                top_song = queue[0]
+            length = self.queue.len()
+            if length > 0:
+                top_song = self.queue.get_first()
                 if not top_song.waiting:
                     # not waiting -> song was active
-                    queue.remove(top_song)
-                if len(queue) > 0:
-                    new_top = queue[0]
-                    queue[0] = RequestTuple(
-                        False,
-                        new_top.non_prio,
-                        new_top.timestamp,
-                        new_top.song,
-                        new_top.requestee,
+                    self.queue.remove(top_song)
+                length = self.queue.len()
+                if length > 0:
+                    new_top = self.queue.get_first()
+                    self.queue.remove(new_top)
+                    self.queue.insert(
+                        0,
+                        RequestTuple(
+                            False,
+                            new_top.non_prio,
+                            new_top.timestamp,
+                            new_top.song,
+                            new_top.requestee,
+                        ),
                     )
-                    safe_queue()
+                    self.queue.safe_queue()
                     message = f"Nächster Song: {new_top.song} requestet von {new_top.requestee}"
                 else:
-                    safe_queue()
+                    self.queue.safe_queue()
                     message = "Queue leer, säd"
             else:
-                safe_queue()
+                self.queue.safe_queue()
                 message = "Queue leer, säd"
             print(message)
             await self.send_message(ctx, message)
@@ -339,14 +379,14 @@ class Bot(commands.Bot):
     @commands.command()
     async def randomize(self, ctx: commands.Context):
         if ctx.author.is_mod:
-            if len(queue) == 0:
+            length = self.queue.len()
+            if length == 0:
                 return
-            top_song = queue[0]
-            if not top_song[0]:
-                # [0] is waiting -> not waiting -> song was active
-                queue.remove(top_song)
-            new_top = random.choice(queue)
-            queue.insert(
+            top_song = self.queue.get_first()
+            if not top_song.waiting:
+                self.queue.remove(top_song)
+            new_top = self.queue.get_random()
+            self.queue.insert(
                 0,
                 RequestTuple(
                     False,
@@ -357,8 +397,8 @@ class Bot(commands.Bot):
                 ),
             )
             message = f"Nächster Song: {new_top.song} requestet von {new_top.requestee}"
-            queue.remove(new_top)
-            safe_queue()
+            self.queue.remove(new_top)
+            self.queue.safe_queue()
             print(message)
             await self.send_message(ctx, message)
         else:
@@ -379,20 +419,21 @@ class Bot(commands.Bot):
             await self.send_message(ctx, f"{cmd_arg} ist anscheinend keine Zahl")
             return
 
-        if idx >= len(queue):
+        length = self.queue.len()
+        if idx >= length:
             await self.send_message(
                 ctx, f"@{ctx.author.name}: So lang ist Queue nicht. Upsi"
             )
             return
         if ctx.author.is_mod:
-            if len(queue) > 0:
-                top_song = queue[0]
-                if not top_song[0]:
+            if length > 0:
+                top_song = self.queue.get_first()
+                if not top_song.waiting:
                     # [0] is waiting -> not waiting -> song was active
-                    queue.remove(top_song)
-                new_top = queue[idx - 1]
-                queue.remove(new_top)
-                queue.insert(
+                    self.queue.remove(top_song)
+                new_top = self.queue.get_element(idx - 1)
+                self.queue.remove(new_top)
+                self.queue.insert(
                     0,
                     RequestTuple(
                         False,
@@ -405,7 +446,7 @@ class Bot(commands.Bot):
                 message = (
                     f"Nächster Song: {new_top.song} requestet von {new_top.requestee}"
                 )
-                safe_queue()
+                self.queue.safe_queue()
             else:
                 message = "Queue leer, säd"
             print(message)
@@ -436,7 +477,7 @@ class Bot(commands.Bot):
     @commands.command()
     async def allrequests(self, ctx: commands.Context):
         await self.send_message(
-            ctx, f"die gesamte Warteschlange gibts unter {requests_url}"
+            ctx, f"die gesamte Warteschlange gibts unter {self.queue.url}"
         )
 
 
