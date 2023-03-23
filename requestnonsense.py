@@ -146,6 +146,80 @@ class RequestQueue:
 
         return "\n".join(requests_markdown)
 
+    def process_request(self, song: str, requestee: str) -> str:
+        waiting = True
+        non_prio = True
+        moment = time.time()
+
+        if (request := self.get_request_for_user(requestee)) is not None:
+            request_tuple = RequestTuple(
+                request.waiting,
+                request.non_prio,
+                request.timestamp,
+                song,
+                requestee,
+            )
+            self.append(request_tuple)
+            self.remove(request)
+            self.sort()
+            message = f"@{requestee}: Dein Request wurde aktualisert zu {song}"
+        else:
+            request_tuple = RequestTuple(waiting, non_prio, moment, song, requestee)
+            self.append(request_tuple)
+            message = f"@{requestee}: Dein Request für {song} ist eingetragen."
+
+        self.safe_queue()
+        return message
+
+    def process_upgrade(self, requestee: str, author: str) -> str:
+        if (request := self.get_request_for_user(requestee)) is not None:
+            self.remove(request)
+            self.append(
+                RequestTuple(
+                    request.waiting,
+                    False,
+                    request.timestamp,
+                    request.song,
+                    request.requestee,
+                )
+            )
+            self.sort()
+            self.safe_queue()
+            print(f"Der Request von {request.requestee} hat jetzt prio")
+            message = f"@{author}: Der Request von {request.requestee} hat jetzt prio"
+        else:
+            print(f"{requestee} hat keine Request in der Warteschlange")
+            message = f"@{author}: {requestee} hat keine Request in der Warteschlange"
+        return message
+
+    def advance_queue(self, next_song: RequestTuple) -> str:
+        if len(self.data) > 0:
+            top_song = self.get_first()
+            if not top_song.waiting:
+                # [0] is waiting -> not waiting -> song was active
+                self.remove(top_song)
+
+            self.remove(next_song)
+            self.append(
+                RequestTuple(
+                    False,
+                    next_song.non_prio,
+                    next_song.timestamp,
+                    next_song.song,
+                    next_song.requestee,
+                )
+            )
+            self.sort()
+            message = (
+                f"Nächster Song: {next_song.song} requestet von {next_song.requestee}"
+            )
+            self.safe_queue()
+        else:
+            message = "Queue leer, säd"
+        print(message)
+
+        return message
+
 
 def create_note(content: str) -> str:
     payload = {
@@ -252,38 +326,13 @@ class Bot(commands.Bot):
         change song data in the request for a given user
         """
         print("request awaited")
-        message = str(ctx.message.content)
-        cmd_arg = message.split(" ", maxsplit=1)[1]
+        cmd_message = str(ctx.message.content)
+        cmd_arg = cmd_message.split(" ", maxsplit=1)[1]
         song = songs.get(int(cmd_arg))
+        requestee = str(ctx.author.name)
         message: str
         if song:
-            waiting = True
-            non_prio = True
-            moment = time.time()
-            requestee = str(ctx.author.name)
-
-            if (request := self.queue.get_request_for_user(requestee)) is not None:
-                request_tuple = RequestTuple(
-                    request.waiting,
-                    request.non_prio,
-                    request.timestamp,
-                    song,
-                    requestee,
-                )
-                self.queue.append(request_tuple)
-                self.queue.remove(request)
-                self.queue.sort()
-                message = (
-                    f"@{ctx.author.name}: Dein Request wurde aktualisert zu {song}"
-                )
-            else:
-                request_tuple = RequestTuple(waiting, non_prio, moment, song, requestee)
-                self.queue.append(request_tuple)
-                message = (
-                    f"@{ctx.author.name}: Dein Request für {song} ist eingetragen."
-                )
-
-            self.queue.safe_queue()
+            message = self.queue.process_request(song, requestee)
         else:
             print(f"song {song} not found")
             message = f"@{ctx.author.name} konnte keinen Song für {ctx.message} finden"
@@ -292,41 +341,18 @@ class Bot(commands.Bot):
 
     @commands.command()
     async def upgrade_request(self, ctx: commands.Context):
+        message: str
         if ctx.author.is_mod:
             print("upgrade awaited")
             command = str(ctx.message.content)
-            cmd_arg = command.split(" ", maxsplit=1)[1]
-            if cmd_arg.startswith("@"):
-                cmd_arg = cmd_arg[1:]
-
-            if (request := self.queue.get_request_for_user(cmd_arg)) is not None:
-                self.queue.remove(request)
-                self.queue.append(
-                    RequestTuple(
-                        request.waiting,
-                        False,
-                        request.timestamp,
-                        request.song,
-                        request.requestee,
-                    )
-                )
-                self.queue.sort()
-                self.queue.safe_queue()
-                print(f"Der Request von {request.requestee} hat jetzt prio")
-                await self.send_message(
-                    ctx,
-                    f"@{ctx.author.name}: Der Request von {request.requestee} hat jetzt prio",
-                )
-            else:
-                print(f"{cmd_arg} hat keine Request in der Warteschlange")
-                await self.send_message(
-                    ctx,
-                    f"@{ctx.author.name}: {cmd_arg} hat keine Request in der Warteschlange",
-                )
+            author = str(ctx.author.name)
+            requestee = command.split(" ", maxsplit=1)[1]
+            if requestee.startswith("@"):
+                requestee = requestee[1:]
+            message = self.queue.process_upgrade(requestee, author)
         else:
-            await self.send_message(
-                ctx, f"@{ctx.author.name}: Das ist ein Mod-Only-Befehl"
-            )
+            message = f"@{ctx.author.name}: Das ist ein Mod-Only-Befehl"
+        await self.send_message(ctx, message)
 
     @commands.command()
     async def position(self, ctx: commands.Context):
@@ -340,77 +366,43 @@ class Bot(commands.Bot):
 
     @commands.command()
     async def next(self, ctx: commands.Context):
+        message: str
+        next_song: RequestTuple = self.queue.get_first()
+        for request in self.queue.data:
+            if request.waiting:
+                next_song = request
+                break
+
         if ctx.author.is_mod:
-            length = self.queue.len()
-            if length > 0:
-                top_song = self.queue.get_first()
-                if not top_song.waiting:
-                    # not waiting -> song was active
-                    self.queue.remove(top_song)
-                length = self.queue.len()
-                if length > 0:
-                    new_top = self.queue.get_first()
-                    self.queue.remove(new_top)
-                    self.queue.insert(
-                        0,
-                        RequestTuple(
-                            False,
-                            new_top.non_prio,
-                            new_top.timestamp,
-                            new_top.song,
-                            new_top.requestee,
-                        ),
-                    )
-                    self.queue.safe_queue()
-                    message = f"Nächster Song: {new_top.song} requestet von {new_top.requestee}"
-                else:
-                    self.queue.safe_queue()
-                    message = "Queue leer, säd"
-            else:
-                self.queue.safe_queue()
-                message = "Queue leer, säd"
-            print(message)
-            await self.send_message(ctx, message)
+            message = self.queue.advance_queue(next_song)
         else:
-            await self.send_message(
-                ctx, f"@{ctx.author.name}: Das ist ein Mod-Only-Befehl"
-            )
+            message = f"@{ctx.author.name}: Das ist ein Mod-Only-Befehl"
+
+        print(message)
+        await self.send_message(ctx, message)
 
     @commands.command()
     async def randomize(self, ctx: commands.Context):
+        message: str
         if ctx.author.is_mod:
             length = self.queue.len()
             if length == 0:
                 return
-            top_song = self.queue.get_first()
-            if not top_song.waiting:
-                self.queue.remove(top_song)
+
             new_top = self.queue.get_random()
-            self.queue.insert(
-                0,
-                RequestTuple(
-                    False,
-                    new_top.non_prio,
-                    new_top.timestamp,
-                    new_top.song,
-                    new_top.requestee,
-                ),
-            )
-            message = f"Nächster Song: {new_top.song} requestet von {new_top.requestee}"
-            self.queue.remove(new_top)
-            self.queue.safe_queue()
-            print(message)
-            await self.send_message(ctx, message)
+            message = self.queue.advance_queue(new_top)
+
         else:
-            await self.send_message(
-                ctx, f"@{ctx.author.name}: Das ist ein Mod-Only-Befehl"
-            )
+            message = f"@{ctx.author.name}: Das ist ein Mod-Only-Befehl"
+
+        print(message)
+        await self.send_message(ctx, message)
 
     @commands.command()
     async def scam(self, ctx: commands.Context):
         print("Scam awaited")
-        message = str(ctx.message.content)
-        cmd_arg = message.split(" ", maxsplit=1)[1]
+        cmd_message = str(ctx.message.content)
+        cmd_arg = cmd_message.split(" ", maxsplit=1)[1]
 
         try:
             idx = int(cmd_arg)
@@ -425,36 +417,14 @@ class Bot(commands.Bot):
                 ctx, f"@{ctx.author.name}: So lang ist Queue nicht. Upsi"
             )
             return
+        new_top = self.queue.get_element(idx - 1)
+
         if ctx.author.is_mod:
-            if length > 0:
-                top_song = self.queue.get_first()
-                if not top_song.waiting:
-                    # [0] is waiting -> not waiting -> song was active
-                    self.queue.remove(top_song)
-                new_top = self.queue.get_element(idx - 1)
-                self.queue.remove(new_top)
-                self.queue.insert(
-                    0,
-                    RequestTuple(
-                        False,
-                        new_top.non_prio,
-                        new_top.timestamp,
-                        new_top.song,
-                        new_top.requestee,
-                    ),
-                )
-                message = (
-                    f"Nächster Song: {new_top.song} requestet von {new_top.requestee}"
-                )
-                self.queue.safe_queue()
-            else:
-                message = "Queue leer, säd"
-            print(message)
-            await self.send_message(ctx, message)
+            message = self.queue.advance_queue(new_top)
         else:
-            await self.send_message(
-                ctx, f"@{ctx.author.name}: Das ist ein Mod-Only-Befehl"
-            )
+            message = f"@{ctx.author.name}: Das ist ein Mod-Only-Befehl"
+
+        await self.send_message(ctx, message)
 
     @commands.command()
     async def help(self, ctx: commands.Context):
