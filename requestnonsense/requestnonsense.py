@@ -73,6 +73,12 @@ class RequestTuple(NamedTuple):
     song: str
     requestee: str
 
+    def __str__(self):
+        return f"{self.song} requested von {self.requestee}"
+
+    def __repr__(self):
+        return f"<RequestTuple({self.waiting}, {self.non_prio}, {self.timestamp}, {self.song}, {self.requestee})>"
+
 
 class RequestQueue:
     """wir machen jetzt alberne Tricks, um die Queue irgendwann in sqlite zu haben. yay"""
@@ -193,7 +199,9 @@ class RequestQueue:
         return message
 
     def advance_queue(self, next_song: RequestTuple) -> str:
+
         if len(self.data) > 0:
+            
             top_song = self.get_first()
             if not top_song.waiting:
                 # [0] is waiting -> not waiting -> song was active

@@ -1,3 +1,5 @@
 twitchio
 python-decouple
 requests
+
+pytest
