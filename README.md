@@ -23,6 +23,8 @@ Check LIST_DELIMITER and LIST_CFSM in example.env.
 We rely on Columns "Artist", "Title" and "Arrangements" in songlist, additional columns are ignored.
 If your csv does not have arrangements, you can go with `INSTRUMENTS=` in .env - this will simply use all songs.
 
+Songlist might be in the wrong encoding. Try this: `iconv -f UTF-16 ./songlist.csv  > ./encoded_songlist.csv`
+
 ## why hackmd?
 
 - Request-Queue and Songlist with request commands should available in the web. Request-Queue will change throughout your stream, those changes should be automatically synced to browsers. HackMD will do that for us. 
