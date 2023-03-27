@@ -168,7 +168,7 @@ class RequestQueue:
             self.append(request_tuple)
             self.remove(request)
             self.sort()
-            message = f"@{requestee}: Dein Request wurde aktualisert zu {song}"
+            message = f"@{requestee}: Dein Request wurde aktualisiert zu {song}"
         else:
             request_tuple = RequestTuple(waiting, non_prio, moment, song, requestee)
             self.append(request_tuple)
@@ -199,13 +199,22 @@ class RequestQueue:
         return message
 
     def advance_queue(self, next_song: RequestTuple) -> str:
-
         if len(self.data) > 0:
-            
             top_song = self.get_first()
             if not top_song.waiting:
                 # [0] is waiting -> not waiting -> song was active
                 self.remove(top_song)
+                if len(self.data) == 0:
+                    # no more songs left, säd
+                    message = "Queue leer, säd"
+                    print(message)
+                    self.safe_queue()
+                    return message
+            if next_song not in self.data:
+                message = f"{next_song.song} is nicht (mehr) in der Queue. Upsi."
+                print(message)
+                self.safe_queue()
+                return message
 
             self.remove(next_song)
             self.append(
@@ -449,7 +458,7 @@ class Bot(commands.Bot):
             ctx,
             "1: Request kostet nichts. "
             "2: 2 verschenkter Subs: wir schieben deinen Request hoch. "
-            "3. Iron Maiden und Dragonforce nur für eine Dono für Kora von Mindestens 25 €.",
+            "3. Iron Maiden und Dragonforce nur für eine Dono für Kora von Mindestens 25 €. Link zum Donaten findet sich unter dem Stream ",
         )
 
     @commands.command()

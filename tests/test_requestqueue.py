@@ -48,3 +48,50 @@ def test_process_upgrade(mocked_safe_queue):
             assert req.waiting
             assert not req.non_prio
             assert req.song in ["1", "3"]
+
+
+@mock.patch("requestnonsense.requestnonsense.RequestQueue.safe_queue")
+def test_consume_all_next(mocked_safe_queue):
+    qu = RequestQueue()
+    requests = [
+        RequestTuple(True, True, 1.0, "1", "A"),
+        RequestTuple(True, True, 1.1, "2", "B"),
+        RequestTuple(True, True, 1.2, "3", "C"),
+        RequestTuple(True, True, 1.3, "4", "D"),
+    ]
+    for req in requests:
+        qu.append(req)
+    while qu.len() != 0:
+        next_song = qu.get_first()
+        for request in qu.data:
+            if request.waiting:
+                next_song = request
+                break
+        message = qu.advance_queue(next_song)
+        if qu.len() != 0:
+            assert next_song.requestee in message
+            assert next_song.song in message
+            assert not qu.get_first().waiting
+        else:
+            assert "leer" in message
+
+
+@mock.patch("requestnonsense.requestnonsense.RequestQueue.safe_queue")
+def test_overwrite_request(mocked_safe_queue):
+    qu = RequestQueue()
+    message_old = qu.process_request("1", "A")
+    request_old = qu.get_first()
+
+    message_new = qu.process_request("2", "A")
+    request_new = qu.get_first()
+
+    assert request_old.timestamp == request_new.timestamp
+    assert request_old.non_prio == request_new.non_prio
+    assert request_old.requestee == request_new.requestee
+    assert qu.get_first().song == "2"
+
+    assert "aktualisiert" in message_new
+    assert "2" in message_new
+
+    assert "eingetragen" in message_old
+    assert "1" in message_old
