@@ -457,8 +457,8 @@ class Bot(commands.Bot):
         await self.send_message(
             ctx,
             "1: Request kostet nichts. "
-            "2: 2 verschenkter Subs: wir schieben deinen Request hoch. "
-            "3. Iron Maiden und Dragonforce nur für eine Dono für Kora von Mindestens 25 €. Link zum Donaten findet sich unter dem Stream ",
+            "2: 1 verschenkter Sub: wir schieben deinen Request hoch. "
+            "3. Iron Maiden und Dragonforce nur für mindestens 5 Giftsubs.",
         )
 
     @commands.command()
