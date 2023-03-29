@@ -27,6 +27,22 @@ import time
 import os
 
 # config
+BotConfig = TypedDict(
+    "BotConfig",
+    {
+        "token": str,
+        "prefix": list[str],
+        "initial_channels": list[str],
+        "message_prefix": str,
+    },
+)
+BOT_CONFIG = BotConfig(
+    token=str(config("ACCESS_TOKEN")),
+    prefix=config("BOT_PREFIX", cast=Csv(post_process=list), default="?,!"),  # type: ignore
+    initial_channels=[str(config("CHANNEL"))],
+    message_prefix=str(config("MESSAGE_PREFIX")),
+)
+
 HackMDConfig = TypedDict(
     "HackMDConfig",
     {
@@ -302,7 +318,9 @@ Such dir einen Song raus, kopier das Request-Command und fügs im Chat ein.
 | --- | --- | --- |""",
     ]
     for idx, song in enumerate(song_list, start=1):
-        songlist_markdown.append(f"| {song[0]} | {song[1]} | ?request {idx} |")
+        songlist_markdown.append(
+            f"| {song[0]} | {song[1]} | {BOT_CONFIG.get('prefix')[0]}request {idx} |"
+        )
 
     songs_url = create_note("\n".join(songlist_markdown))
 
@@ -313,11 +331,11 @@ class Bot(commands.Bot):
 
     def __init__(self):
         super().__init__(
-            token=str(config("ACCESS_TOKEN")),
-            prefix=config("BOT_PREFIX", cast=Csv(post_process=list), default="?,!"),  # type: ignore
-            initial_channels=[config("CHANNEL")],
+            token=BOT_CONFIG.get("token"),
+            prefix=BOT_CONFIG.get("prefix"),
+            initial_channels=BOT_CONFIG.get("initial_channels"),
         )
-        self.message_prefix = str(config("MESSAGE_PREFIX"))
+        self.message_prefix = BOT_CONFIG.get("message_prefix")
         self.queue = RequestQueue()
 
     async def send_message(self, ctx: commands.Context, message: str):
@@ -458,7 +476,7 @@ class Bot(commands.Bot):
             ctx,
             "1: Request kostet nichts. "
             "2: 1 verschenkter Sub: wir schieben deinen Request hoch. "
-            "3. Iron Maiden und Dragonforce nur für mindestens 5 Giftsubs.",
+            "3. Iron Maiden und Dragonforce nur für mindestens 10 Giftsubs.",
         )
 
     @commands.command()
