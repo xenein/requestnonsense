@@ -286,59 +286,10 @@ class RequestQueue:
         return message
 
 
-def create_note(content: str) -> str:
-    payload = {
-        "content": content,
-    }
-    payload.update(HACKMD_CONFIG.get("payload"))
-
-    _response = requests.post(
-        HACKMD_CONFIG.get("endpoint"),
-        headers=HACKMD_CONFIG.get("headers"),
-        json=payload,
-    )
-    return f"https://hackmd.io/{_response.json().get('id')}"
-
-
-def update_note(content: str, note_url: str) -> bool:
-    note_id = note_url.split("/")[-1]
-    payload = {
-        "content": content,
-    }
-    payload.update(HACKMD_CONFIG.get("payload"))
-
-    _response = requests.patch(
-        f"{HACKMD_CONFIG.get('endpoint')}{note_id}",
-        headers=HACKMD_CONFIG.get("headers"),
-        json=payload,
-    )
-
-    return _response.status_code == 202
-
-
-songs = dict()
-songs_url = ""
-if os.path.exists(LIST_CONFIG.get("path")):
-    with open(LIST_CONFIG.get("path")) as fh:
-        start = 1 if LIST_CONFIG.get("CFSM") else 0
-        csv_lines = fh.readlines()[start:]
-    reader = csv.DictReader(csv_lines, delimiter=LIST_CONFIG.get("delimiter"))
-
-    song_set = set()
-    for line in reader:
-        if instruments := LIST_CONFIG.get("instruments"):
-            for instrument in instruments:
-                if instrument in str(line.get("Arrangements")):
-                    song_set.add((line.get("Artist"), line.get("Title")))
-        else:
-            song_set.add((line.get("Artist"), line.get("Title")))
-
-    song_list = list(song_set)
-    song_list.sort()
-    for idx, song in enumerate(song_list, start=1):
-        songs[idx] = f"{song[0]} - {song[1]}"
-
-    songlist_markdown = [
+class Songs(dict):
+    note: HackMDNote
+    csvpath: str
+    markdown_start = [
         HACKMD_CONFIG.get("tags"),
         f"""# {HACKMD_CONFIG.get("listTitle")}
 
@@ -349,17 +300,44 @@ Such dir einen Song raus, kopier das Request-Command und fügs im Chat ein.
 | Artist | Title | Command&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; |
 | --- | --- | --- |""",
     ]
-    for idx, song in enumerate(song_list, start=1):
-        songlist_markdown.append(
-            f"| {song[0]} | {song[1]} | {BOT_CONFIG.get('prefix')[0]}request {idx} |"
-        )
 
-    songs_url = create_note("\n".join(songlist_markdown))
+    def __init__(self):
+        self.csvpath = LIST_CONFIG.get("path")
+        if os.path.exists(self.csvpath):
+            with open(self.csvpath) as fh:
+                start = 1 if LIST_CONFIG.get("CFSM") else 0
+                csv_lines = fh.readlines()[start:]
+            reader = csv.DictReader(csv_lines, delimiter=LIST_CONFIG.get("delimiter"))
+
+            # use set to ensure uniqueness and prevent nonsense
+            song_set = set()
+            for line in reader:
+                if instruments := LIST_CONFIG.get("instruments"):
+                    for instrument in instruments:
+                        if instrument in str(line.get("Arrangements")):
+                            song_set.add((line.get("Artist"), line.get("Title")))
+                else:
+                    song_set.add((line.get("Artist"), line.get("Title")))
+
+            markdown = self.markdown_start[:]
+            for idx, song in enumerate(sorted(song_set), start=1):
+                self[idx] = f"{song[0]} - {song[1]}"
+                markdown.append(
+                    f"| {song[0]} | {song[1]} | {BOT_CONFIG.get('prefix')[0]}request {idx} |"
+                )
+
+            self.note = HackMDNote("\n".join(markdown))
+            print(f"Songlist ready, see {self.note.url}")
+
+    @property
+    def url(self):
+        return self.note.url
 
 
 class Bot(commands.Bot):
     message_prefix: str = ""
     queue: RequestQueue
+    songs: Songs
 
     def __init__(self):
         super().__init__(
@@ -368,6 +346,8 @@ class Bot(commands.Bot):
             initial_channels=BOT_CONFIG.get("initial_channels"),
         )
         self.message_prefix = BOT_CONFIG.get("message_prefix")
+
+        self.songs = Songs()
         self.queue = RequestQueue()
 
     async def send_message(self, ctx: commands.Context, message: str):
@@ -395,7 +375,7 @@ class Bot(commands.Bot):
         print("request awaited")
         cmd_message = str(ctx.message.content)
         cmd_arg = cmd_message.split(" ", maxsplit=1)[1]
-        song = songs.get(int(cmd_arg))
+        song = self.songs.get(int(cmd_arg))
         requestee = str(ctx.author.name)
         message: str
         if song:
@@ -497,7 +477,7 @@ class Bot(commands.Bot):
     async def help(self, ctx: commands.Context):
         await self.send_message(
             ctx,
-            f"1: Song unter {songs_url} finden. "
+            f"1: Song unter {self.songs.url} finden. "
             "2: Request-Befehl kopieren. "
             "3: Request-Befehl im Chat einfügen.",
         )
