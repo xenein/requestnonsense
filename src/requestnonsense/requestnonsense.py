@@ -79,6 +79,39 @@ LIST_CONFIG = ListConfig(
 )
 
 
+class HackMDNote:
+    note_id: str
+    content: str
+
+    def __init__(self, initial_content: str):
+        self.content = initial_content
+        self.request_headers = HACKMD_CONFIG.get("headers")
+        self.endpoint = HACKMD_CONFIG.get("endpoint")
+        self.base_payload = HACKMD_CONFIG.get("payload")
+
+        payload = {"content": initial_content}
+        payload.update(self.base_payload)
+
+        response = requests.post(
+            self.endpoint, headers=self.request_headers, json=payload
+        )
+        self.id = response.json().get("id")
+
+    def update(self, content: str) -> bool:
+        payload = {"content": content}
+        payload.update(self.base_payload)
+
+        response = requests.patch(
+            f"{self.endpoint}{self.id}", headers=self.request_headers, json=payload
+        )
+
+        return response.status_code == 302
+
+    @property
+    def url(self):
+        return f"{self.endpoint}{self.id}"
+
+
 # request-tuples
 class RequestTuple(NamedTuple):
     """Requests are handled in tuples. Fields within requests can be accessed by name, too"""
@@ -100,16 +133,15 @@ class RequestQueue:
     """wir machen jetzt alberne Tricks, um die Queue irgendwann in sqlite zu haben. yay"""
 
     data: list[RequestTuple]
-    url: str
+    note: HackMDNote
 
     def __init__(self):
-        self.url = create_note("")
         if os.path.exists(config("QUEUE_FILE")):
             with open(config("QUEUE_FILE"), mode="rb") as fh:
                 self.data = pickle.load(fh)
         else:
             self.data = list()
-        update_note(self.generate_requests_markdown(), self.url)
+        self.note = HackMDNote(self.generate_requests_markdown())
 
     def append(self, item: RequestTuple):
         self.data.append(item)
@@ -150,7 +182,7 @@ class RequestQueue:
     def safe_queue(self):
         with open(config("QUEUE_FILE"), mode="wb") as fh:
             pickle.dump(self.data, fh)
-        update_note(self.generate_requests_markdown(), self.url)
+        self.note.update(self.generate_requests_markdown())
 
     def generate_requests_markdown(self) -> str:
         if len(self.data) == 0:
@@ -482,7 +514,7 @@ class Bot(commands.Bot):
     @commands.command()
     async def allrequests(self, ctx: commands.Context):
         await self.send_message(
-            ctx, f"die gesamte Warteschlange gibts unter {self.queue.url}"
+            ctx, f"die gesamte Warteschlange gibts unter {self.queue.note.url}"
         )
 
 
