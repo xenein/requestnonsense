@@ -15,82 +15,41 @@ if you send another, you keep your place in the queue, song is changed though
 the list of available songs as well as the current queue are pushed to hackmd-notes
 """
 
-from decouple import config, Csv
 from twitchio.ext import commands
-from typing import NamedTuple, TypedDict
+from typing import NamedTuple
 
 import csv
 import pickle
 import random
 import requests
 import time
+import tomllib
 import os
-
-# config
-BotConfig = TypedDict(
-    "BotConfig",
-    {
-        "token": str,
-        "prefix": list[str],
-        "initial_channels": list[str],
-        "message_prefix": str,
-    },
-)
-BOT_CONFIG = BotConfig(
-    token=str(config("ACCESS_TOKEN")),
-    prefix=config("BOT_PREFIX", cast=Csv(post_process=list), default="?,!"),  # type: ignore
-    initial_channels=[str(config("CHANNEL"))],
-    message_prefix=str(config("MESSAGE_PREFIX")),
-)
-
-HackMDConfig = TypedDict(
-    "HackMDConfig",
-    {
-        "tags": str,
-        "headers": dict[str, str],
-        "endpoint": str,
-        "payload": dict[str, str],
-        "queueTitle": str,
-        "listTitle": str,
-    },
-)
-HACKMD_CONFIG = HackMDConfig(
-    tags=f"---\ntags: {config('HACKMDTAG', default='requestnonsense')}\n---",
-    headers={"Authorization": f"Bearer {config('HACKMDTOKEN')}"},
-    endpoint="https://api.hackmd.io/v1/notes/",
-    payload={
-        "readPermission": "guest",
-        "writePermission": "owner",
-        "commentPermission": "disabled",
-    },
-    queueTitle=str(config("QUEUETITLE", default="Queue")),
-    listTitle=str(config("LISTTITLE", default="List")),
-)
-
-
-ListConfig = TypedDict(
-    "ListConfig", {"delimiter": str, "CFSM": bool, "instruments": list, "path": str}
-)
-LIST_CONFIG = ListConfig(
-    delimiter=str(config("LIST_DELIMITER", default=";")),
-    CFSM=bool(config("LIST_CFSM", cast=bool)),
-    instruments=config("INSTRUMENTS", cast=Csv(), default=[]),  # type: ignore
-    path=str(config("SONGLIST", default="./songlist.csv")),
-)
 
 
 class HackMDNote:
     note_id: str
     content: str
+    endpoint: str
+    request_headers: dict
 
-    def __init__(self, initial_content: str):
+    def __init__(
+        self,
+        initial_content: str,
+        api_token: str,
+        endpoint: str = "https://api.hackmd.io/v1/notes/",
+    ):
+
         self.content = initial_content
-        self.request_headers = HACKMD_CONFIG.get("headers")
-        self.endpoint = HACKMD_CONFIG.get("endpoint")
-        self.base_payload = HACKMD_CONFIG.get("payload")
+        self.request_headers = {"Authorization": f"Bearer {api_token}"}
+        self.endpoint = endpoint
 
-        payload = {"content": initial_content}
-        payload.update(self.base_payload)
+        payload = {
+            "content": initial_content,
+            "readPermission": "guest",
+            "writePermission": "owner",
+            "commentPermission": "disabled",
+        }
 
         response = requests.post(
             self.endpoint, headers=self.request_headers, json=payload
@@ -98,8 +57,13 @@ class HackMDNote:
         self.id = response.json().get("id")
 
     def update(self, content: str) -> bool:
-        payload = {"content": content}
-        payload.update(self.base_payload)
+        self.content = content
+        payload = {
+            "content": content,
+            "readPermission": "guest",
+            "writePermission": "owner",
+            "commentPermission": "disabled",
+        }
 
         response = requests.patch(
             f"{self.endpoint}{self.id}", headers=self.request_headers, json=payload
@@ -109,7 +73,7 @@ class HackMDNote:
 
     @property
     def url(self):
-        return f"{self.endpoint}{self.id}"
+        return f"https://hackmd.io/{self.id}"
 
 
 # request-tuples
@@ -134,14 +98,32 @@ class RequestQueue:
 
     data: list[RequestTuple]
     note: HackMDNote
+    hackmd_tags: str
+    queue_path: str
+    queue_title: str
 
-    def __init__(self):
-        if os.path.exists(config("QUEUE_FILE")):
-            with open(config("QUEUE_FILE"), mode="rb") as fh:
+    def __init__(
+        self,
+        path: str,
+        hackmd_token: str,
+        hackmd_tags: str = "requestnonsense",
+        hackmd_queue_title: str = "Queue",
+        hackmd_endpoint: str = "https://api.hackmd.io/v1/notes/",
+    ):
+        self.hackmd_tags = hackmd_tags
+        self.queue_title = hackmd_queue_title
+
+        self.queue_path = path
+        if os.path.exists(self.queue_path):
+            with open(self.queue_path, mode="rb") as fh:
                 self.data = pickle.load(fh)
         else:
             self.data = list()
-        self.note = HackMDNote(self.generate_requests_markdown())
+        self.note = HackMDNote(
+            self.generate_requests_markdown(),
+            api_token=hackmd_token,
+            endpoint=hackmd_endpoint,
+        )
 
     def append(self, item: RequestTuple):
         self.data.append(item)
@@ -180,15 +162,15 @@ class RequestQueue:
         return None
 
     def safe_queue(self):
-        with open(config("QUEUE_FILE"), mode="wb") as fh:
+        with open(self.queue_path, mode="wb") as fh:
             pickle.dump(self.data, fh)
         self.note.update(self.generate_requests_markdown())
 
     def generate_requests_markdown(self) -> str:
         if len(self.data) == 0:
-            return f"{HACKMD_CONFIG.get('tags')}# {HACKMD_CONFIG.get('queueTitle')}\n Beeindruckend leer hier"
+            return f"---\ntags: {self.hackmd_tags}\n---# {self.queue_title}\n Beeindruckend leer hier"
         requests_markdown = [
-            f"{HACKMD_CONFIG.get('tags')}# {HACKMD_CONFIG.get('queueTitle')}",
+            f"---\ntags: {self.hackmd_tags}\n---# {self.queue_title}",
             "",
             "| Pos | Song | User |",
             "| --- | --- | --- |",
@@ -289,9 +271,22 @@ class RequestQueue:
 class Songs(dict):
     note: HackMDNote
     csvpath: str
-    markdown_start = [
-        HACKMD_CONFIG.get("tags"),
-        f"""# {HACKMD_CONFIG.get("listTitle")}
+    markdown_start: list
+
+    def __init__(
+        self,
+        csv_path: str,
+        hackmd_token: str,
+        bot_prefix: str,
+        cfsm: bool = False,
+        delimiter: str = ";",
+        hackmd_tags: str = "requestnonsense",
+        list_title: str = "List",
+        instruments: list[str] = [],
+    ):
+        self.markdown_start = [
+            f"---\ntags: {hackmd_tags}\n---",
+            f"""# {list_title}
 
 Such dir einen Song raus, kopier das Request-Command und fügs im Chat ein.
 
@@ -299,22 +294,21 @@ Such dir einen Song raus, kopier das Request-Command und fügs im Chat ein.
 
 | Artist | Title | Command&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; |
 | --- | --- | --- |""",
-    ]
+        ]
 
-    def __init__(self):
-        self.csvpath = LIST_CONFIG.get("path")
+        self.csvpath = csv_path
         if os.path.exists(self.csvpath):
             with open(self.csvpath) as fh:
-                start = 1 if LIST_CONFIG.get("CFSM") else 0
+                start = 1 if cfsm else 0
                 csv_lines = fh.readlines()[start:]
-            reader = csv.DictReader(csv_lines, delimiter=LIST_CONFIG.get("delimiter"))
+            reader = csv.DictReader(csv_lines, delimiter=delimiter)
 
             # use set to ensure uniqueness and prevent nonsense
             song_set = set()
             for line in reader:
-                if instruments := LIST_CONFIG.get("instruments"):
+                if len(instruments) != 0:
                     for instrument in instruments:
-                        if instrument in str(line.get("Arrangements")):
+                        if instrument in line["Arrangements"]:
                             song_set.add((line.get("Artist"), line.get("Title")))
                 else:
                     song_set.add((line.get("Artist"), line.get("Title")))
@@ -323,10 +317,10 @@ Such dir einen Song raus, kopier das Request-Command und fügs im Chat ein.
             for idx, song in enumerate(sorted(song_set), start=1):
                 self[idx] = f"{song[0]} - {song[1]}"
                 markdown.append(
-                    f"| {song[0]} | {song[1]} | {BOT_CONFIG.get('prefix')[0]}request {idx} |"
+                    f"| {song[0]} | {song[1]} | {bot_prefix}request {idx} |"
                 )
 
-            self.note = HackMDNote("\n".join(markdown))
+            self.note = HackMDNote("\n".join(markdown), api_token=hackmd_token)
             print(f"Songlist ready, see {self.note.url}")
 
     @property
@@ -335,20 +329,49 @@ Such dir einen Song raus, kopier das Request-Command und fügs im Chat ein.
 
 
 class Bot(commands.Bot):
-    message_prefix: str = ""
+    message_prefix: str
     queue: RequestQueue
     songs: Songs
 
-    def __init__(self):
+    def __init__(
+        self,
+        csv_path: str,
+        hackmd_token: str,
+        hackmd_tags: str,
+        queue_path: str,
+        twitch_token: str,
+        bot_prefix: list,
+        channel: str,
+        cfsm: bool,
+        delimiter: str = ";",
+        list_title: str = "List",
+        queue_title: str = "Queue",
+        message_prefix: str = "",
+        instruments: list[str] = [],
+    ):
         super().__init__(
-            token=BOT_CONFIG.get("token"),
-            prefix=BOT_CONFIG.get("prefix"),
-            initial_channels=BOT_CONFIG.get("initial_channels"),
+            token=twitch_token,
+            prefix=bot_prefix,
+            initial_channels=[channel],
         )
-        self.message_prefix = BOT_CONFIG.get("message_prefix")
+        self.message_prefix = message_prefix
 
-        self.songs = Songs()
-        self.queue = RequestQueue()
+        self.songs = Songs(
+            csv_path=csv_path,
+            hackmd_token=hackmd_token,
+            bot_prefix=bot_prefix[0],
+            cfsm=cfsm,
+            delimiter=delimiter,
+            hackmd_tags=hackmd_tags,
+            list_title=list_title,
+            instruments=instruments,
+        )
+        self.queue = RequestQueue(
+            path=queue_path,
+            hackmd_token=hackmd_token,
+            hackmd_tags=hackmd_tags,
+            hackmd_queue_title=queue_title,
+        )
 
     async def send_message(self, ctx: commands.Context, message: str):
         if self.message_prefix:
@@ -499,5 +522,22 @@ class Bot(commands.Bot):
 
 
 if __name__ == "__main__":
-    bot = Bot()
+    with open("./config.toml", mode="rb") as tc:
+        config = tomllib.load(tc)
+
+    bot = Bot(
+        csv_path=config["Local"]["SONGLIST"],
+        hackmd_token=config["HACKMD"]["HACKMDTOKEN"],
+        hackmd_tags=config["HACKMD"]["HACKMDTAG"],
+        queue_path=config["Local"]["QUEUE_FILE"],
+        twitch_token=config["Twitch"]["ACCESS_TOKEN"],
+        bot_prefix=config["Twitch"]["BOT_PREFIX"],
+        channel=config["Twitch"]["CHANNEL"],
+        cfsm=config["Local"]["LIST_CFSM"],
+        instruments=config["Local"]["INSTRUMENTS"],
+        delimiter=config["Local"]["LIST_DELIMITER"],
+        list_title=config["HACKMD"]["LISTTITLE"],
+        queue_title=config["HACKMD"]["QUEUETITLE"],
+        message_prefix=config["Twitch"]["MESSAGE_PREFIX"],
+    )
     bot.run()

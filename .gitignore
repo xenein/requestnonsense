@@ -129,6 +129,7 @@ dmypy.json
 .pyre/
 
 # prject files
+config.toml
 songlist.csv
 queue.bin
 .DS_STORE

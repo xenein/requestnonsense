@@ -4,7 +4,7 @@ from requestnonsense.requestnonsense import RequestQueue, RequestTuple
 
 
 def test_append_simple():
-    qu = RequestQueue()
+    qu = RequestQueue(path="./testqueue.bin", hackmd_token="abc")
     rq = RequestTuple(False, False, 1.0, "miau - meow", "Goethe")
 
     old_len = qu.len()
@@ -17,7 +17,7 @@ def test_append_simple():
 
 @mock.patch("requestnonsense.requestnonsense.RequestQueue.safe_queue")
 def test_process_upgrade(mocked_safe_queue):
-    qu = RequestQueue()
+    qu = RequestQueue(path="./testqueue.bin", hackmd_token="abc")
     requests = [
         RequestTuple(True, True, 1.0, "1", "A"),
         RequestTuple(True, True, 1.1, "2", "B"),
@@ -52,7 +52,7 @@ def test_process_upgrade(mocked_safe_queue):
 
 @mock.patch("requestnonsense.requestnonsense.RequestQueue.safe_queue")
 def test_consume_all_next(mocked_safe_queue):
-    qu = RequestQueue()
+    qu = RequestQueue(path="./testqueue.bin", hackmd_token="abc")
     requests = [
         RequestTuple(True, True, 1.0, "1", "A"),
         RequestTuple(True, True, 1.1, "2", "B"),
@@ -78,7 +78,7 @@ def test_consume_all_next(mocked_safe_queue):
 
 @mock.patch("requestnonsense.requestnonsense.RequestQueue.safe_queue")
 def test_overwrite_request(mocked_safe_queue):
-    qu = RequestQueue()
+    qu = RequestQueue(path="./testqueue.bin", hackmd_token="abc")
     message_old = qu.process_request("1", "A")
     request_old = qu.get_first()
 
