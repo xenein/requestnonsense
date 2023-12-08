@@ -39,7 +39,6 @@ class HackMDNote:
         api_token: str,
         endpoint: str = "https://api.hackmd.io/v1/notes/",
     ):
-
         self.content = initial_content
         self.request_headers = {"Authorization": f"Bearer {api_token}"}
         self.endpoint = endpoint
@@ -286,6 +285,7 @@ class Songs(dict):
     ):
         self.markdown_start = [
             f"---\ntags: {hackmd_tags}\n---",
+            "\n {% hackmd theme-dark %} \n",
             f"""# {list_title}
 
 Such dir einen Song raus, kopier das Request-Command und fügs im Chat ein.
@@ -382,6 +382,8 @@ class Bot(commands.Bot):
     async def event_ready(self):
         print(f"Logged in as: {self.nick}")
         print(f"User id: {self.user_id}")
+        print(f"Queue: {self.queue.note.url}")
+        print(f"Songlist: {self.songs.note.url}")
         await self.connected_channels[0].send("Requestnonsense bereit")
 
     @commands.command()
@@ -510,8 +512,7 @@ class Bot(commands.Bot):
         await self.send_message(
             ctx,
             "1: Request kostet nichts. "
-            "2: 1 verschenkter Sub: wir schieben deinen Request hoch. "
-            "3. Iron Maiden und Dragonforce nur für mindestens 10 Giftsubs.",
+            "2: 5 Euro Spende dein Song kommt als nächstes.",
         )
 
     @commands.command()

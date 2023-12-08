@@ -21,7 +21,7 @@ CFSM uses the first line in the csv file to denote the delimiter (usually ";").
 Check LIST_DELIMITER and LIST_CFSM in example.env. 
 
 We rely on Columns "Artist", "Title" and "Arrangements" in songlist, additional columns are ignored.
-If your csv does not have arrangements, you can go with `INSTRUMENTS=` in .env - this will simply use all songs.
+If your csv does not have arrangements, you can go with `INSTRUMENTS=[]` in config.toml - this will simply use all songs.
 
 Songlist might be in the wrong encoding. Try this: `iconv -f UTF-16 ./songlist.csv  > ./encoded_songlist.csv`
 

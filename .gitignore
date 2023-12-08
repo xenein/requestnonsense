@@ -168,3 +168,5 @@ src/requestnonsense/._requestnonsense.py
 ._tests
 
 ._venv
+
+tests/._test_requestqueue.py
