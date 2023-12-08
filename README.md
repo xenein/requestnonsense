@@ -7,18 +7,22 @@ let's request some songs in twitch channels you do not need to own
 2. `python -m venv venv`
 3. `source venv/bin/activate`
 4. `pip install -r requirements.txt`
-5. `cp example.env .env`
+5. `cp example_config.toml config.toml`
 6. get twitch chat bot token via https://twitchtokengenerator.com/
 7. get hackmd.io api token
-8. put api tokens in .env
-9. build songlist csv - (customs forge song manager will create one for you)
+8. put api tokens in config.toml
+9. build songlist csv - (rocksmith-folks: customs forge song manager will create one for you)
 10. `python requestnonsense.py`
 
 ## songlist csv format
 
+Songlists are read from CSV-files, I usually use one build with CFSM, but you
+can craft one by hand. If you don't have your delimiter in the first line, set
+`LIST_CFSM=false` in config.toml.
+
 Customs Forge Song Manager CSV-Format starts with a line denoting the delimiter.
 CFSM uses the first line in the csv file to denote the delimiter (usually ";").
-Check LIST_DELIMITER and LIST_CFSM in example.env. 
+Check LIST_DELIMITER and LIST_CFSM in config.toml. 
 
 We rely on Columns "Artist", "Title" and "Arrangements" in songlist, additional columns are ignored.
 If your csv does not have arrangements, you can go with `INSTRUMENTS=[]` in config.toml - this will simply use all songs.
@@ -28,12 +32,12 @@ Songlist might be in the wrong encoding. Try this: `iconv -f UTF-16 ./songlist.c
 ## why hackmd?
 
 - Request-Queue and Songlist with request commands should available in the web. Request-Queue will change throughout your stream, those changes should be automatically synced to browsers. HackMD will do that for us. 
-- HackMD uses markdown. It is easy convenient to build markdown sources for songlist and requests. 
+- HackMD uses markdown. It is easy and convenient to build markdown sources for songlist and requests. 
 - HackMD has a free tier including more than 1000 API-Requests per month. That should last for a while
 
 ## so what can you do?
 
-everything happens in twitchchat. Commands may start with ! or ?. (you can set any string prefix with BOT_PREFIX in .env)
+everything happens in twitchchat. Commands may start with ! or ?. (you can set any string prefix with BOT_PREFIX in config.toml)
 
 ### Everyone can:
 
